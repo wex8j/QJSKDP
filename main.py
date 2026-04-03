@@ -1,13 +1,13 @@
 import os
 import requests
 import urllib.parse
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 import yt_dlp
 
 app = FastAPI()
 
-# الواجهة كما هي
+# الواجهة كما هي (بدون تغييرات معقدة)
 HTML_CONTENT = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -19,8 +19,8 @@ HTML_CONTENT = """
         body { font-family: sans-serif; background: #0b0b0b; color: white; text-align: center; padding: 40px 10px; }
         .card { background: #161616; padding: 30px; border-radius: 20px; max-width: 450px; margin: auto; border: 1px solid #333; }
         input { width: 100%; padding: 15px; border-radius: 12px; border: none; background: #222; color: white; margin-bottom: 15px; box-sizing: border-box; }
-        button { background: #f1c40f; color: black; border: none; padding: 15px; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; }
-        #status { margin-top: 20px; color: #f1c40f; }
+        button { background: #f1c40f; color: black; border: none; padding: 15px; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px;}
+        #status { margin-top: 20px; color: #f1c40f; font-weight: bold; }
         #result-box { margin-top: 25px; display: none; padding: 20px; background: #222; border-radius: 15px; }
         .download-btn { display: block; background: #27ae60; color: white; padding: 15px; text-decoration: none; border-radius: 10px; margin-top: 15px; font-weight: bold; }
     </style>
@@ -29,7 +29,7 @@ HTML_CONTENT = """
     <div class="card">
         <h1>🎵 يلا ميوزك</h1>
         <input type="text" id="urlInput" placeholder="ضع رابط الفيديو هنا...">
-        <button id="btn" onclick="processDownload()">استخراج وتحميل</button>
+        <button id="btn" onclick="processDownload()">استخراج الرابط</button>
         <div id="status"></div>
         <div id="result-box">
             <h4 id="vTitle" style="margin-bottom:15px; color:#f1c40f;"></h4>
@@ -42,18 +42,20 @@ HTML_CONTENT = """
             const status = document.getElementById('status');
             const resBox = document.getElementById('result-box');
             if(!url) return alert("ضع الرابط!");
+            
             status.innerText = "جاري المعالجة... ⏳";
             resBox.style.display = "none";
+            
             try {
                 const res = await fetch(`/api/extract?url=${encodeURIComponent(url)}`);
                 const data = await res.json();
                 if(data.success) {
                     document.getElementById('vTitle').innerText = data.title;
                     document.getElementById('dlAction').href = data.download_url;
-                    status.innerText = "تم بنجاح! ✅";
+                    status.innerText = "تم بنجاح! جاهز للتحميل ✅";
                     resBox.style.display = "block";
                 } else { status.innerText = "فشل: " + data.error; }
-            } catch (e) { status.innerText = "خطأ في السيرفر (500)"; }
+            } catch (e) { status.innerText = "حدث خطأ في الاتصال."; }
         }
     </script>
 </body>
@@ -66,37 +68,46 @@ async def index():
 
 @app.get("/api/extract")
 async def extract(url: str):
-    ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
+    ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'music')
-            # نمرر الرابط للبروكسي
+            title = info.get('title', 'Yalla_Music_Audio')
+            video_url = info.get('url')
+            
+            # تشفير الرابط والاسم قبل إرسالهما للبروكسي
+            safe_url = urllib.parse.quote(video_url)
+            safe_name = urllib.parse.quote(title)
+            
             return {
                 "success": True,
                 "title": title,
-                "download_url": f"/proxy?url={urllib.parse.quote(info.get('url'))}&name={urllib.parse.quote(title)}"
+                "download_url": f"/proxy?url={safe_url}&name={safe_name}"
             }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @app.get("/proxy")
-async def proxy(url: str, name: str = "music"):
-    # فك تشفير الرابط والاسم
+async def proxy(url: str, name: str = "Yalla_Music_Audio"):
     target_url = urllib.parse.unquote(url)
     target_name = urllib.parse.unquote(name)
     
     def stream_content():
-        # نستخدم جلسة (Session) لسرعة الطلب وتفادي الخطأ 500
-        with requests.Session() as session:
-            r = session.get(target_url, stream=True, timeout=20)
-            # نرفع حجم الـ Chunk لتقليل الضغط على المعالج
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    yield chunk
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        try:
+            with requests.get(target_url, stream=True, headers=headers, timeout=20) as r:
+                for chunk in r.iter_content(chunk_size=1024 * 512):
+                    if chunk:
+                        yield chunk
+        except Exception as e:
+            print(f"Error streaming: {e}")
 
+    # ===== هذا هو السطر الذي حل مشكلة الخطأ 500 =====
+    # تشفير الاسم العربي لكي يتقبله المتصفح والسيرفر بدون انهيار
+    safe_filename = urllib.parse.quote(f"{target_name}.mp3")
+    
     headers = {
-        "Content-Disposition": f'attachment; filename="{target_name}.mp3"',
+        "Content-Disposition": f"attachment; filename*=utf-8''{safe_filename}",
         "Content-Type": "audio/mpeg"
     }
-    return StreamingResponse(stream_content(), headers=headers)
+    return StreamingResponse(stream_content(), media_type="audio/mpeg", headers=headers)
