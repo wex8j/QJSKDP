@@ -1,90 +1,59 @@
 import os
 import requests
 import urllib.parse
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 import yt_dlp
 
 app = FastAPI()
 
-# واجهة مستخدم محسنة مع "نظام كشف أخطاء"
+# الواجهة كما هي
 HTML_CONTENT = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>يلا ميوزك - النسخة المستقرة</title>
+    <title>يلا ميوزك - Yalla Music</title>
     <style>
-        body { font-family: sans-serif; background: #0b0b0b; color: white; text-align: center; padding: 30px 10px; }
-        .card { background: #1a1a1a; padding: 25px; border-radius: 15px; max-width: 450px; margin: auto; border: 2px solid #333; }
-        h1 { color: #f1c40f; }
-        input { width: 100%; padding: 15px; border-radius: 10px; border: none; background: #222; color: white; margin-bottom: 15px; box-sizing: border-box; }
-        #btn { background: #f1c40f; color: black; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 18px; }
-        #btn:disabled { background: #555; cursor: not-allowed; }
-        #status { margin: 20px 0; color: #aaa; font-size: 14px; }
-        #result-box { display: none; background: #222; padding: 20px; border-radius: 15px; border: 2px solid #27ae60; margin-top: 20px; }
-        .thumb { width: 100%; border-radius: 10px; margin-bottom: 15px; }
-        .download-btn { display: block; background: #27ae60; color: white; padding: 15px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 18px; }
-        .error-msg { color: #e74c3c; background: #321; padding: 10px; border-radius: 10px; margin-top: 10px; display: none; }
+        body { font-family: sans-serif; background: #0b0b0b; color: white; text-align: center; padding: 40px 10px; }
+        .card { background: #161616; padding: 30px; border-radius: 20px; max-width: 450px; margin: auto; border: 1px solid #333; }
+        input { width: 100%; padding: 15px; border-radius: 12px; border: none; background: #222; color: white; margin-bottom: 15px; box-sizing: border-box; }
+        button { background: #f1c40f; color: black; border: none; padding: 15px; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        #status { margin-top: 20px; color: #f1c40f; }
+        #result-box { margin-top: 25px; display: none; padding: 20px; background: #222; border-radius: 15px; }
+        .download-btn { display: block; background: #27ae60; color: white; padding: 15px; text-decoration: none; border-radius: 10px; margin-top: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="card">
         <h1>🎵 يلا ميوزك</h1>
-        <p>إذا اختفت النتيجة، يرجى تحديث الصفحة</p>
         <input type="text" id="urlInput" placeholder="ضع رابط الفيديو هنا...">
-        <button id="btn" onclick="startWork()">ابدأ الاستخراج الآن</button>
-        
-        <div id="status">جاهز للعمل...</div>
-        <div id="errorBox" class="error-msg"></div>
-
+        <button id="btn" onclick="processDownload()">استخراج وتحميل</button>
+        <div id="status"></div>
         <div id="result-box">
-            <img id="vThumb" class="thumb" src="">
-            <h3 id="vTitle" style="color:#f1c40f; margin-bottom:15px;"></h3>
-            <a id="dlAction" class="download-btn" href="#">تحميل بصيغة MP3 📥</a>
+            <h4 id="vTitle" style="margin-bottom:15px; color:#f1c40f;"></h4>
+            <a id="dlAction" class="download-btn" href="#">اضغط هنا لبدء التنزيل 📥</a>
         </div>
     </div>
-
     <script>
-        async function startWork() {
+        async function processDownload() {
             const url = document.getElementById('urlInput').value;
-            const btn = document.getElementById('btn');
             const status = document.getElementById('status');
             const resBox = document.getElementById('result-box');
-            const errorBox = document.getElementById('errorBox');
-
-            if(!url) return alert("الرجاء وضع رابط!");
-
-            // تحضير الواجهة
-            btn.disabled = true;
-            status.innerText = "جاري الاتصال بالسيرفر وتجاوز حظر يوتيوب... ⏳";
+            if(!url) return alert("ضع الرابط!");
+            status.innerText = "جاري المعالجة... ⏳";
             resBox.style.display = "none";
-            errorBox.style.display = "none";
-
             try {
-                const response = await fetch(`/api/extract?url=${encodeURIComponent(url)}`);
-                const data = await response.json();
-
-                if (data.success) {
+                const res = await fetch(`/api/extract?url=${encodeURIComponent(url)}`);
+                const data = await res.json();
+                if(data.success) {
                     document.getElementById('vTitle').innerText = data.title;
-                    document.getElementById('vThumb').src = data.thumbnail;
                     document.getElementById('dlAction').href = data.download_url;
-                    
-                    status.innerText = "اكتمل بنجاح! ✅";
-                    resBox.style.display = "block"; // إظهار النتيجة بقوة
-                } else {
-                    status.innerText = "فشل الاستخراج";
-                    errorBox.innerText = "خطأ السيرفر: " + data.error;
-                    errorBox.style.display = "block";
-                }
-            } catch (err) {
-                status.innerText = "خطأ في الشبكة";
-                errorBox.innerText = "تعذر الاتصال بالسيرفر. تأكد أن Railway شغال.";
-                errorBox.style.display = "block";
-            } finally {
-                btn.disabled = false;
-            }
+                    status.innerText = "تم بنجاح! ✅";
+                    resBox.style.display = "block";
+                } else { status.innerText = "فشل: " + data.error; }
+            } catch (e) { status.innerText = "خطأ في السيرفر (500)"; }
         }
     </script>
 </body>
@@ -97,35 +66,37 @@ async def index():
 
 @app.get("/api/extract")
 async def extract(url: str):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-    }
+    ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'music_file')
-            # تجهيز رابط البروكسي مع اسم الملف
-            safe_name = urllib.parse.quote(title)
+            title = info.get('title', 'music')
+            # نمرر الرابط للبروكسي
             return {
                 "success": True,
                 "title": title,
-                "thumbnail": info.get('thumbnail'),
-                "download_url": f"/proxy?url={info.get('url')}&name={safe_name}"
+                "download_url": f"/proxy?url={urllib.parse.quote(info.get('url'))}&name={urllib.parse.quote(title)}"
             }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @app.get("/proxy")
 async def proxy(url: str, name: str = "music"):
+    # فك تشفير الرابط والاسم
+    target_url = urllib.parse.unquote(url)
+    target_name = urllib.parse.unquote(name)
+    
     def stream_content():
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        with requests.get(url, stream=True, headers=headers) as r:
-            for chunk in r.iter_content(chunk_size=1024 * 512):
-                yield chunk
+        # نستخدم جلسة (Session) لسرعة الطلب وتفادي الخطأ 500
+        with requests.Session() as session:
+            r = session.get(target_url, stream=True, timeout=20)
+            # نرفع حجم الـ Chunk لتقليل الضغط على المعالج
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    yield chunk
 
-    decoded_name = urllib.parse.unquote(name)
-    headers = {"Content-Disposition": f'attachment; filename="{decoded_name}.mp3"'}
-    return StreamingResponse(stream_content(), media_type="audio/mpeg", headers=headers)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{target_name}.mp3"',
+        "Content-Type": "audio/mpeg"
+    }
+    return StreamingResponse(stream_content(), headers=headers)
