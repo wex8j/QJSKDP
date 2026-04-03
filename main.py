@@ -1,20 +1,25 @@
 import os
 import requests
 import urllib.parse
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
+import re
+from fastapi import FastAPI, Response
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 import yt_dlp
 
 app = FastAPI()
 
-# الواجهة كما هي (بدون تغييرات معقدة)
+# الواجهة المحسنة التي تدعم "تطبيق الموبايل" و "الاستلام المباشر للمشاركة"
 HTML_CONTENT = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>يلا ميوزك - Yalla Music</title>
+    <title>يلا ميوزك</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0b0b0b">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3844/3844724.png">
+    
     <style>
         body { font-family: sans-serif; background: #0b0b0b; color: white; text-align: center; padding: 40px 10px; }
         .card { background: #161616; padding: 30px; border-radius: 20px; max-width: 450px; margin: auto; border: 1px solid #333; }
@@ -36,14 +41,34 @@ HTML_CONTENT = """
             <a id="dlAction" class="download-btn" href="#">اضغط هنا لبدء التنزيل 📥</a>
         </div>
     </div>
+    
     <script>
+        // تسجيل السيرفر ووركر ليصبح تطبيقاً
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js');
+        }
+
+        // هذه الدالة تشتغل أول ما تفتح التطبيق لكي تفحص إذا جئت من زر "مشاركة"
+        window.onload = () => {
+            const params = new URLSearchParams(window.location.search);
+            const sharedText = params.get('text') || params.get('url') || params.get('title') || '';
+            
+            // فلترة النص لاستخراج الرابط فقط (لأن يوتيوب يرسل كلام مع الرابط)
+            const urlMatch = sharedText.match(/https?:\\/\\/[^\\s]+/);
+            if (urlMatch) {
+                document.getElementById('urlInput').value = urlMatch[0];
+                // يحمل كبل!
+                processDownload();
+            }
+        };
+
         async function processDownload() {
             const url = document.getElementById('urlInput').value;
             const status = document.getElementById('status');
             const resBox = document.getElementById('result-box');
             if(!url) return alert("ضع الرابط!");
             
-            status.innerText = "جاري المعالجة... ⏳";
+            status.innerText = "جاري جلب الأغنية... ⏳";
             resBox.style.display = "none";
             
             try {
@@ -52,8 +77,11 @@ HTML_CONTENT = """
                 if(data.success) {
                     document.getElementById('vTitle').innerText = data.title;
                     document.getElementById('dlAction').href = data.download_url;
-                    status.innerText = "تم بنجاح! جاهز للتحميل ✅";
+                    status.innerText = "تم! جاهز للتحميل ✅";
                     resBox.style.display = "block";
+                    
+                    // إذا أردت أن يفتح رابط التحميل تلقائياً، يمكنك تفعيل السطر التالي (لكن بعض المتصفحات تمنعه)
+                    // window.location.href = data.download_url;
                 } else { status.innerText = "فشل: " + data.error; }
             } catch (e) { status.innerText = "حدث خطأ في الاتصال."; }
         }
@@ -66,6 +94,42 @@ HTML_CONTENT = """
 async def index():
     return HTML_CONTENT
 
+# ===== مسارات التطبيق (PWA) =====
+@app.get("/manifest.json")
+async def get_manifest():
+    return JSONResponse(content={
+        "name": "يلا ميوزك",
+        "short_name": "يلا ميوزك",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0b0b0b",
+        "theme_color": "#f1c40f",
+        "icons": [{
+            "src": "https://cdn-icons-png.flaticon.com/512/3844/3844724.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }],
+        # هذا الجزء هو المسؤول عن إظهار التطبيق في قائمة "مشاركة"
+        "share_target": {
+            "action": "/",
+            "method": "GET",
+            "params": {
+                "title": "title",
+                "text": "text",
+                "url": "url"
+            }
+        }
+    })
+
+@app.get("/sw.js")
+async def get_sw():
+    sw_code = """
+    self.addEventListener('install', (e) => { self.skipWaiting(); });
+    self.addEventListener('fetch', (e) => { });
+    """
+    return Response(content=sw_code, media_type="application/javascript")
+
+# ===== نظام التحميل والبروكسي =====
 @app.get("/api/extract")
 async def extract(url: str):
     ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'no_warnings': True}
@@ -75,7 +139,6 @@ async def extract(url: str):
             title = info.get('title', 'Yalla_Music_Audio')
             video_url = info.get('url')
             
-            # تشفير الرابط والاسم قبل إرسالهما للبروكسي
             safe_url = urllib.parse.quote(video_url)
             safe_name = urllib.parse.quote(title)
             
@@ -97,15 +160,10 @@ async def proxy(url: str, name: str = "Yalla_Music_Audio"):
         try:
             with requests.get(target_url, stream=True, headers=headers, timeout=20) as r:
                 for chunk in r.iter_content(chunk_size=1024 * 512):
-                    if chunk:
-                        yield chunk
-        except Exception as e:
-            print(f"Error streaming: {e}")
+                    if chunk: yield chunk
+        except: pass
 
-    # ===== هذا هو السطر الذي حل مشكلة الخطأ 500 =====
-    # تشفير الاسم العربي لكي يتقبله المتصفح والسيرفر بدون انهيار
     safe_filename = urllib.parse.quote(f"{target_name}.mp3")
-    
     headers = {
         "Content-Disposition": f"attachment; filename*=utf-8''{safe_filename}",
         "Content-Type": "audio/mpeg"
