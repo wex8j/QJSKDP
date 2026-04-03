@@ -6,7 +6,7 @@ import yt_dlp
 
 app = FastAPI()
 
-# واجهة الموقع المتكاملة
+# واجهة مستخدم محسنة وتمنع الاختفاء المفاجئ
 HTML_CONTENT = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -15,50 +15,69 @@ HTML_CONTENT = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>يلا ميوزك - Yalla Music</title>
     <style>
-        body { font-family: sans-serif; background: #0b0b0b; color: white; text-align: center; padding: 50px 20px; }
-        .card { background: #161616; padding: 30px; border-radius: 20px; max-width: 500px; margin: auto; border: 1px solid #333; }
-        h1 { color: #f1c40f; margin-bottom: 20px; }
-        input { width: 100%; padding: 15px; border-radius: 10px; border: none; background: #222; color: white; margin-bottom: 20px; box-sizing: border-box; }
-        button { background: #f1c40f; color: black; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; cursor: pointer; }
-        #status { margin-top: 20px; color: #aaa; }
-        #result { margin-top: 20px; display: none; }
-        .download-btn { display: block; background: #27ae60; color: white; padding: 15px; text-decoration: none; border-radius: 10px; margin-top: 10px; font-weight: bold; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0b0b0b; color: white; text-align: center; padding: 40px 10px; }
+        .card { background: #161616; padding: 30px; border-radius: 20px; max-width: 450px; margin: auto; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h1 { color: #f1c40f; margin-bottom: 10px; font-size: 28px; }
+        p { color: #888; font-size: 14px; margin-bottom: 25px; }
+        input { width: 100%; padding: 15px; border-radius: 12px; border: 2px solid #333; background: #222; color: white; margin-bottom: 15px; box-sizing: border-box; font-size: 16px; outline: none; }
+        input:focus { border-color: #f1c40f; }
+        button { background: #f1c40f; color: black; border: none; padding: 15px; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 17px; transition: 0.3s; }
+        button:hover { background: #d4ac0d; transform: scale(1.02); }
+        #status { margin-top: 20px; color: #f1c40f; font-weight: bold; min-height: 24px; }
+        #result-box { margin-top: 25px; display: none; padding: 20px; background: #222; border-radius: 15px; border: 1px dashed #444; }
+        .download-btn { display: block; background: #27ae60; color: white; padding: 15px; text-decoration: none; border-radius: 10px; margin-top: 15px; font-weight: bold; font-size: 18px; }
+        .download-btn:hover { background: #219150; }
     </style>
 </head>
 <body>
     <div class="card">
         <h1>🎵 يلا ميوزك</h1>
-        <input type="text" id="urlInput" placeholder="ضع رابط الفيديو هنا...">
-        <button onclick="extract()">استخراج الرابط</button>
+        <p>تطبيق تحميل الموسيقى الخاص بك</p>
+        
+        <input type="text" id="urlInput" placeholder="ضع رابط الفيديو هنا (يوتيوب، تيك توك...)">
+        <button id="btn" onclick="processDownload()">استخراج الرابط</button>
+        
         <div id="status"></div>
-        <div id="result">
-            <h3 id="title"></h3>
-            <a id="dlLink" class="download-btn" href="">تحميل الآن 📥</a>
+        
+        <div id="result-box">
+            <h4 id="videoTitle" style="margin:0; font-size:15px; color:#ddd;"></h4>
+            <a id="dlAction" class="download-btn" href="#">اضغط هنا لبدء التنزيل 📥</a>
         </div>
     </div>
 
     <script>
-        async function extract() {
+        async function processDownload() {
             const url = document.getElementById('urlInput').value;
             const status = document.getElementById('status');
-            const result = document.getElementById('result');
-            if(!url) return alert("ضع الرابط أولاً!");
+            const resultBox = document.getElementById('result-box');
+            const btn = document.getElementById('btn');
 
-            status.innerText = "جاري التحضير... انتظر ثواني ⏳";
-            result.style.display = "none";
+            if(!url) return alert("يرجى وضع الرابط أولاً!");
+
+            // تغيير حالة الزر والنص
+            btn.disabled = true;
+            status.innerText = "جاري جلب البيانات من السيرفر... ⏳";
+            resultBox.style.display = "none";
 
             try {
                 const res = await fetch(`/api/extract?url=${encodeURIComponent(url)}`);
                 const data = await res.json();
-                status.innerText = "";
+                
                 if(data.success) {
-                    document.getElementById('title').innerText = data.title;
-                    document.getElementById('dlLink').href = data.download_url;
-                    result.style.display = "block";
+                    document.getElementById('videoTitle').innerText = data.title;
+                    document.getElementById('dlAction').href = data.download_url;
+                    
+                    status.innerText = "تم استخراج الرابط بنجاح! ✅";
+                    resultBox.style.display = "block";
                 } else {
-                    status.innerText = "فشل: " + data.error;
+                    status.innerText = "⚠️ فشل الاستخراج، تأكد من الرابط.";
+                    alert("خطأ: " + data.error);
                 }
-            } catch (e) { status.innerText = "خطأ في الاتصال بالسيرفر"; }
+            } catch (e) {
+                status.innerText = "❌ حدث خطأ في السيرفر.";
+            } finally {
+                btn.disabled = false;
+            }
         }
     </script>
 </body>
@@ -75,29 +94,29 @@ async def extract(url: str):
         'format': 'bestaudio/best',
         'quiet': True,
         'no_warnings': True,
+        'noplaylist': True,
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             video_url = info.get('url')
-            # نربط الزر بمسار البروكسي لنتجنب حظر يوتيوب 403
+            # نستخدم مسار البروكسي لتجنب الـ 403
             return {
                 "success": True,
                 "title": info.get('title'),
-                "download_url": f"/proxy?url={video_url}&title={info.get('title')}"
+                "download_url": f"/proxy?url={video_url}"
             }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 @app.get("/proxy")
-async def proxy(url: str, title: str = "music"):
+async def proxy(url: str):
     def stream_content():
-        # نستخدم Headers تجعل يوتيوب يظن أننا متصفح عادي
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get(url, stream=True, headers=headers)
         for chunk in r.iter_content(chunk_size=1024 * 1024):
             yield chunk
 
-    # نجعل المتصفح يحمل الملف بدلاً من تشغيله
-    content_disposition = f'attachment; filename="{title}.mp3"'
-    return StreamingResponse(stream_content(), media_type="audio/mpeg", headers={"Content-Disposition": content_disposition})
+    # إجبار المتصفح على التحميل كملف MP3
+    headers = {"Content-Disposition": 'attachment; filename="yalla-music.mp3"'}
+    return StreamingResponse(stream_content(), media_type="audio/mpeg", headers=headers)
